@@ -17,22 +17,23 @@ from annotator.uniformer import UniformerDetector
 from cldm.model import create_model, load_state_dict
 from cldm.ddim_hacked import DDIMSampler
 
-apply_uniformer = UniformerDetector()
+apply_uniformer = UniformerDetector() # for deteting semantic segmentations.
 model = create_model('./models/cldm_v15.yaml').cpu()
 model.load_state_dict(load_state_dict('./models/control_sd15_seg.pth', location='cuda'))
 model = model.cuda()
 ddim_sampler = DDIMSampler(model)
+output_dir = "./demo_output"
 
 
 def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, detect_resolution, ddim_steps, guess_mode, strength, scale, seed, eta):
     with torch.no_grad():
         input_image = HWC3(input_image)
         detected_map = apply_uniformer(resize_image(input_image, detect_resolution))
+        plt.imsave(os.path.join(output_dir, "Uniformer_Detector.png"), detected_map)
         img = resize_image(input_image, image_resolution)
         H, W, C = img.shape
 
         detected_map = cv2.resize(detected_map, (W, H), interpolation=cv2.INTER_NEAREST)
-
         control = torch.from_numpy(detected_map.copy()).float().cuda() / 255.0
         control = torch.stack([control for _ in range(num_samples)], dim=0)
         control = einops.rearrange(control, 'b h w c -> b c h w').clone()
@@ -69,11 +70,9 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
 
 if __name__ == "__main__":
     local_image_path = './demo/Distracted_Boyfriend.png'
-    output_dir = "./demo_output"
 
     input_image = np.array(Image.open(local_image_path)) # gr.Image(source='upload', type="numpy")
-    print("image.shape:", input_image.shape)
-    prompt = 'in a fancy restaurant.' # gr.Textbox(label="Prompt")
+    prompt = "A asian, rich, old woman." # 'Chimpanzee style' # gr.Textbox(label="Prompt")
     num_samples = 1  #gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
     image_resolution = 512 # gr.Slider(label="Image Resolution", minimum=256, maximum=768, value=512, step=64)
     strength = 1 # gr.Slider(label="Control Strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
@@ -93,4 +92,4 @@ if __name__ == "__main__":
                      strength, scale, seed, eta)
     # print(len(detected_maps))
     print(result.shape)
-    plt.imsave(os.path.join(output_dir, "controlnet_test.png"), result)
+    plt.imsave(os.path.join(output_dir, f"controlnet_{prompt}_test.png"), result)
