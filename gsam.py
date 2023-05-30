@@ -67,10 +67,10 @@ if __name__ == "__main__":
     ckpt_config_filename = "GroundingDINO_SwinB.cfg.py"
     sam_checkpoint = './models/sam_vit_h_4b8939.pth'
     device = "cuda"
-    TARGET_PROMPT = "woman"
+    TARGET_PROMPT = "background"
     BOX_TRESHOLD = 0.3 
     TEXT_TRESHOLD = 0.25
-    INPAINT_PROMPT = "A asian, rich, old woman."
+    INPAINT_PROMPT = "On a bus."
 
     local_image_path = './demo/Distracted_Boyfriend.png'
     # 
