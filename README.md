@@ -45,6 +45,6 @@ assume you already know the absolute path of installed diffusers
 
 Then, import this new added pipeline in corresponding files
 - in PATH/__init__.py, line 122: add "StableDiffusionControlNetInpaintPipeline,"
-- in PATH/pipelines/__init__.py, line 53: add "StableDiffusionControlNetInpaintPipeline,"
+- in PATH/pipelines/__init__.py, line 56: add "StableDiffusionControlNetInpaintPipeline,"
 - in PATH/pipelines/stable_diffusion/__init__.py, line 50: add "from .pipeline_stable_diffusion_controlnet_inpaint import StableDiffusionControlNetInpaintPipeline"
 See https://github.com/haofanwang/ControlNet-for-Diffusers/tree/main for more detail.

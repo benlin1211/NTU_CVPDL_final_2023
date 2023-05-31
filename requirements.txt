@@ -1,6 +1,6 @@
 git+https://github.com/facebookresearch/segment-anything.git
 git+https://github.com/IDEA-Research/GroundingDINO.git
-diffusers
+diffusers==0.14.0
 transformers
 accelerate
 scipy

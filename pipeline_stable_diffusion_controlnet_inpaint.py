@@ -791,7 +791,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
                 if controlnet_hint is not None:
                     # ControlNet predict the noise residual
                     control = self.controlnet(
-                        latent_model_input, t, encoder_hidden_states=prompt_embeds, controlnet_hint=controlnet_hint
+                        sample=latent_model_input, timestep=t, encoder_hidden_states=prompt_embeds, controlnet_cond=controlnet_hint
                     )
                     control = [item for item in control]
                     latent_model_input = torch.cat([latent_model_input, mask, masked_image_latents], dim=1)

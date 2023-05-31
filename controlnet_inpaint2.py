@@ -7,8 +7,9 @@ import os
 # load control net and stable diffusion v1-5
 controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", torch_dtype=torch.float16)
 pipe_control = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-     "runwayml/stable-diffusion-inpainting", controlnet=controlnet, torch_dtype=torch.float16
- )
+    #"runwayml/stable-diffusion-inpainting", controlnet=controlnet, torch_dtype=torch.float16
+    "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
+)
 
 # speed up diffusion process with faster scheduler and memory optimization
 pipe_control.scheduler = UniPCMultistepScheduler.from_config(pipe_control.scheduler.config)
