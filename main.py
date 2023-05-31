@@ -26,13 +26,20 @@ import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
 
 # control net
-import einops
-from pytorch_lightning import seed_everything
-from annotator.util import resize_image, HWC3
-from annotator.uniformer import UniformerDetector
-import annotator.uniformer.mmcv as mmcv
+# https://github.com/haofanwang/ControlNet-for-Diffusers
+
+# assume you already know the absolute path of installed diffusers
+import diffusers
+# PATH = os.path.dirname(diffusers.__file__)
+# (/home/pywu_server/anaconda3/envs/gsam/lib/python3.9/site-packages/diffusers/pipelines/stable_diffusion/__init__.py)
+#   cp ./pipeline_stable_diffusion_controlnet_inpaint.py PATH/pipelines/stable_diffusion
+# Then, import this new added pipeline in corresponding files
+#   in PATH/__init__.py, line 131: add "StableDiffusionControlNetInpaintPipeline,"
+#   in PATH/pipelines/__init__.py, line 65: add "StableDiffusionControlNetInpaintPipeline,"
+#   in PATH/pipelines/stable_diffusion/__init__.py, line 50: add "from .pipeline_stable_diffusion_controlnet_inpaint import StableDiffusionControlNetInpaintPipeline"
+# See https://github.com/haofanwang/ControlNet-for-Diffusers/tree/main for detail.
+from diffusers import StableDiffusionInpaintPipeline, StableDiffusionControlNetInpaintPipeline
 from cldm.model import create_model, load_state_dict
-from cldm.ddim_hacked import DDIMSampler
 
 # Directly copy from SAM examples: https://github.com/facebookresearch/segment-anything/blob/main/notebooks/onnx_model_example.ipynb
 def show_mask(mask, image, random_color=True):
@@ -64,46 +71,6 @@ def load_model_hf(repo_id, filename, ckpt_config_filename, device='cpu'):
     return model  
 
 
-def process(model, 
-            ddim_sampler, 
-            input_image, 
-            detected_map, 
-            prompt, 
-            a_prompt='best quality, extremely detailed', 
-            n_prompt='longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality', 
-            num_samples=1, image_resolution=512, detect_resolution=512, 
-            ddim_steps=20, guess_mode=False, 
-            strength=1, scale=9.0, seed=1211, eta=0.0):
-    with torch.no_grad():
-        input_image = HWC3(input_image)
-        img = resize_image(input_image, image_resolution)
-        H, W, C = img.shape
-        detected_map = cv2.resize(detected_map, (W, H), interpolation=cv2.INTER_NEAREST)
-        control = torch.from_numpy(detected_map.copy()).float().cuda() / 255.0
-        control = torch.stack([control for _ in range(num_samples)], dim=0)
-        control = einops.rearrange(control, 'b h w c -> b c h w').clone()
-
-        if seed == -1:
-            seed = random.randint(0, 65535)
-        seed_everything(seed)
-
-        cond = {"c_concat": [control], "c_crossattn": [model.get_learned_conditioning([prompt + ', ' + a_prompt] * num_samples)]}
-        un_cond = {"c_concat": None if guess_mode else [control], "c_crossattn": [model.get_learned_conditioning([n_prompt] * num_samples)]}
-        shape = (4, H // 8, W // 8)
-
-        model.control_scales = [strength * (0.825 ** float(12 - i)) for i in range(13)] if guess_mode else ([strength] * 13)  # Magic number. IDK why. Perhaps because 0.825**12<0.01 but 0.826**12>0.01
-        samples, intermediates = ddim_sampler.sample(ddim_steps, num_samples,
-                                                     shape, cond, verbose=False, eta=eta,
-                                                     unconditional_guidance_scale=scale,
-                                                     unconditional_conditioning=un_cond)
-        
-        x_samples = model.decode_first_stage(samples)
-        x_samples = (einops.rearrange(x_samples, 'b c h w -> b h w c') * 127.5 + 127.5).cpu().numpy().clip(0, 255).astype(np.uint8)
-
-        results = [x_samples[i] for i in range(num_samples)]
-    return [detected_map] + results
-
-
 if __name__ == "__main__":
     ckpt_repo_id = "ShilongLiu/GroundingDINO"
     ckpt_filenmae = "groundingdino_swinb_cogcoor.pth"
@@ -114,6 +81,7 @@ if __name__ == "__main__":
     BOX_TRESHOLD = 0.3 
     TEXT_TRESHOLD = 0.25
     INPAINT_PROMPT = "A asian, rich, old woman."
+    NEGATIVE_PROMPT = "lowres, bad anatomy, worst quality, low quality"
 
     local_image_path = './demo/Distracted_Boyfriend.png'
     # 
@@ -129,15 +97,28 @@ if __name__ == "__main__":
     sam_predictor = SamPredictor(sam)
 
     # Load stable diffusion inpainting models
-    controlnet = create_model('./models/cldm_v15.yaml').cpu()
-    controlnet.load_state_dict(load_state_dict('./models/control_sd15_seg.pth', location='cuda'))
-    controlnet = controlnet.cuda()
-    ddim_sampler = DDIMSampler(controlnet)
+    pipe_control = StableDiffusionControlNetInpaintPipeline.from_pretrained(
+        "lllyasviel/sd-controlnet-seg", # https://huggingface.co/lllyasviel/control_v11p_sd15_seg
+        torch_dtype=torch.float16,
+    )
+    #pipe_control = create_model('./models/cldm_v15.yaml').cpu()
+    #pipe_control.load_state_dict(load_state_dict('./models/control_sd15_seg.pth', location='cuda'))
+
+    pipe_inpaint = StableDiffusionInpaintPipeline.from_pretrained(
+        "runwayml/stable-diffusion-inpainting", # https://huggingface.co/runwayml/stable-diffusion-inpainting
+        revision="fp16",
+        torch_dtype=torch.float16,
+    )
+
+    # yes, we can directly replace the UNet
+    pipe_control.unet = pipe_inpaint.unet
+    pipe_control.unet.in_channels = 4
+    pipe_control = pipe_control.to(device)
 
     # Load demo image
     image_source, image = load_image(local_image_path)
 
-    # Run Grounding DINO for detection
+    # Step 1: Run Grounding DINO for detection
     boxes, logits, phrases = predict(
         model=groundingdino_model, 
         image=image, 
@@ -156,7 +137,7 @@ if __name__ == "__main__":
     # box: normalized box xywh -> unnormalized xyxy
     H, W, _ = image_source.shape
     boxes_xyxy = box_ops.box_cxcywh_to_xyxy(boxes) * torch.Tensor([W, H, W, H])
-    # SAM
+    # Step 2: SAM
     transformed_boxes = sam_predictor.transform.apply_boxes_torch(boxes_xyxy, image_source.shape[:2]).to(device)
     masks, _, _ = sam_predictor.predict_torch(
         point_coords = None,
@@ -175,10 +156,13 @@ if __name__ == "__main__":
     image_mask_pil = Image.fromarray((image_mask.cpu().numpy() * 255).astype(np.uint8)).convert("RGBA")
     # Convert PIL to cv2
     image_mask_cv2 = cv2.cvtColor(np.array(image_mask_pil), cv2.COLOR_RGB2BGR)
-    # Run Control net for Image Inpainting
-    # https://github.com/haofanwang/ControlNet-for-Diffusers
-    detected_maps, result = process(controlnet, ddim_sampler, image_source, image_mask_cv2, INPAINT_PROMPT)
-
+    # Step 3: Run Control net for Image Inpainting
+    result = pipe_control(prompt=INPAINT_PROMPT, 
+                         negative_prompt=NEGATIVE_PROMPT,
+                         controlnet_hint=image_mask, # segmentation result 
+                         image=image_source, # segmentation result 
+                         mask_image=image_mask, # mask result (telling model where to inpaint)
+                         num_inference_steps=100).images[0]
     # Un-resize 
     result = Image.fromarray(result)
     image_source_pil = Image.fromarray(image_source)
