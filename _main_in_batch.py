@@ -33,6 +33,25 @@ from huggingface_hub import hf_hub_download
 import diffusers
 from diffusers import ControlNetModel, UniPCMultistepScheduler
 from ControlNetInpaint.src.pipeline_stable_diffusion_controlnet_inpaint import *
+from torch.utils.data import Dataset, DataLoader
+import glob
+
+class Meme(Dataset):
+    def __init__(self, data_root, transform=None):
+        self.transform = transform 
+        self.image_paths = glob.glob(os.path.join(data_root, "*.png"))
+        
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image_source, image = load_image_dino(self.image_paths[idx])
+        name = self.image_paths[idx].split('/')[-1]
+        if self.transform is not None:
+            image = self.transform(image)
+            image_source = self.transform(image_source)
+
+        return image_source, image, name
 
 # Directly copy from SAM examples: https://github.com/facebookresearch/segment-anything/blob/main/notebooks/onnx_model_example.ipynb
 def show_mask(mask, image, random_color=True):
@@ -81,17 +100,19 @@ def convert_anns(anns):
 def make_parser():
     parser = argparse.ArgumentParser(description="hw 4-2 train",
                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("image_path", help="Input image path") 
+    parser.add_argument("image_root", help="Input image root path") 
     parser.add_argument("target_prompt", help="Which object to be inpainted") 
     parser.add_argument("inpaint_prompt", help="What object to inpaint") 
+    parser.add_argument("--output_dir", default="./demo_output_2")
+
     parser.add_argument("--box_threshold", type=float, default=0.3)
     parser.add_argument("--text_threshold", type=float, default=0.25) 
     parser.add_argument("--negative_prompt", default="lowres, bad anatomy, worst quality, low quality")
-    
-    parser.add_argument("--output_dir", default="./demo_output")
+   
     parser.add_argument("--device_dino", default="cpu")
     parser.add_argument("--device_sam", default="cuda:0")
     parser.add_argument("--device_pipe", default="cuda:1")
+    parser.add_argument("--verbose", action='store_true')
     args = parser.parse_args()  
 
     return args
@@ -105,7 +126,6 @@ if __name__ == "__main__":
     sam_checkpoint = './models/sam_vit_h_4b8939.pth'
     turn_on_semantic_guidance = True
     args = make_parser()
-    
     TARGET_PROMPT = args.target_prompt
     BOX_TRESHOLD = args.box_threshold
     TEXT_TRESHOLD = args.text_threshold
@@ -117,6 +137,7 @@ if __name__ == "__main__":
     device_sam = args.device_sam
     device_pipe = args.device_pipe
     output_dir = args.output_dir
+    verbose = args.verbose
     os.makedirs(output_dir, exist_ok=True)
 
     # Load Dino to "cuda:1"
@@ -150,83 +171,88 @@ if __name__ == "__main__":
         safety_checker=None, # Disable NSFW checker for academic use. # https://github.com/huggingface/diffusers/issues/3422
     )
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-    # Disable NSFW checker for academic use.
-    # pipe.safety_checker = lambda images, clip_input: (images, False)
     pipe = pipe.to(device_pipe) #device
 
-    # Load demo image
-    image_source, image = load_image_dino(local_image_path)
+    # load dataset
+    dataset = Meme(data_path)
+    dataloader = DataLoader(train_dataset, batch_size, shuffle=False, num_workers=8)
+    print(len(dataloader))
 
-    # ============== Step 1: Run Grounding DINO for detection ==============
-    boxes, logits, phrases = predict(
-        model=groundingdino_model, 
-        image=image, 
-        caption=TARGET_PROMPT, 
-        box_threshold=BOX_TRESHOLD, 
-        text_threshold=TEXT_TRESHOLD
-    )
+    for image_source, image, name in dataloader:
+        # ============== Step 1: Run Grounding DINO for detection ==============
+        boxes, logits, phrases = predict(
+            model=groundingdino_model, 
+            image=image, 
+            caption=TARGET_PROMPT, 
+            box_threshold=BOX_TRESHOLD, 
+            text_threshold=TEXT_TRESHOLD
+        )
 
-    annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
-    annotated_frame = annotated_frame[...,::-1] # BGR to RGB
-    plt.imsave(os.path.join(output_dir,"origin.png"), image_source)
-    plt.imsave(os.path.join(output_dir,"dino.png"), annotated_frame)
+        if verbose:
+            annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
+            annotated_frame = annotated_frame[...,::-1] # BGR to RGB
+            plt.imsave(os.path.join(output_dir,f"{name}_origin.png"), image_source)
+            plt.imsave(os.path.join(output_dir,f"{name}_dino.png"), annotated_frame)
 
-    # Run segmentation anything model
-    sam_predictor.set_image(image_source)
-    # box: normalized box xywh -> unnormalized xyxy
-    H, W, _ = image_source.shape
-    boxes_xyxy = box_ops.box_cxcywh_to_xyxy(boxes) * torch.Tensor([W, H, W, H])
-    # ========================== Step 2: SAM ==========================
-    transformed_boxes = sam_predictor.transform.apply_boxes_torch(boxes_xyxy, image_source.shape[:2]).to(device=device_sam) # device
-    # with torch.no_grad():
-    masks, _, _ = sam_predictor.predict_torch(
-        point_coords = None,
-        point_labels = None,
-        boxes = transformed_boxes, # box prompt from dino
-        multimask_output = False, # only one mask is returned.
-    )
-    if turn_on_semantic_guidance:
-        sementic_mask = mask_generator.generate(np.array(image_source))
-        sementic_mask = convert_anns(sementic_mask)
+        # Run segmentation anything model
+        sam_predictor.set_image(image_source)
+        # box: normalized box xywh -> unnormalized xyxy
+        H, W, _ = image_source.shape
+        boxes_xyxy = box_ops.box_cxcywh_to_xyxy(boxes) * torch.Tensor([W, H, W, H])
+        # ========================== Step 2: SAM ==========================
+        transformed_boxes = sam_predictor.transform.apply_boxes_torch(boxes_xyxy, image_source.shape[:2]).to(device=device_sam) # device
+        # with torch.no_grad():
+        masks, _, _ = sam_predictor.predict_torch(
+            point_coords = None,
+            point_labels = None,
+            boxes = transformed_boxes, # box prompt from dino
+            multimask_output = False, # only one mask is returned.
+        )
+        if turn_on_semantic_guidance:
+            sementic_mask = mask_generator.generate(np.array(image_source))
+            sementic_mask = convert_anns(sementic_mask)
 
-    # Save mask
-    for i, mask in enumerate(masks):
-        annotated_frame_with_mask = show_mask(mask[0].detach().cpu(), annotated_frame)
-        plt.imsave(os.path.join(output_dir,f"sam_{i}.png"), annotated_frame_with_mask)
-    plt.imsave(os.path.join(output_dir,"sam_all.png"), sementic_mask)
+        # Save mask
+        if verbose:
+            for i, mask in enumerate(masks):
+                annotated_frame_with_mask = show_mask(mask[0].detach().cpu(), annotated_frame)
+                plt.imsave(os.path.join(output_dir,f"{name}_sam_{i}.png"), annotated_frame_with_mask)
+            plt.imsave(os.path.join(output_dir,f"{name}_sam_all.png"), sementic_mask)
 
-    # Get mask
-    image_mask = masks[0][0].detach().cpu()
-    # Convert into PIL RGB
-    image_source_pil = Image.fromarray(image_source).convert("RGB")
-    image_mask_pil = Image.fromarray((image_mask.cpu().numpy() * 255).astype(np.uint8)).convert("RGB")
-    sementic_mask_pil = Image.fromarray((sementic_mask * 255).astype(np.uint8)).convert("RGB")
-    # dino mask 
-    boxes_mask_pil = Image.fromarray((image_mask.cpu().numpy() * 255).astype(np.uint8)).convert("RGB")
+        # Get mask
+        image_mask = masks[0][0].detach().cpu()
+        # Convert into PIL RGB
+        image_source_pil = Image.fromarray(image_source).convert("RGB")
+        image_mask_pil = Image.fromarray((image_mask.cpu().numpy() * 255).astype(np.uint8)).convert("RGB")
+        sementic_mask_pil = Image.fromarray((sementic_mask * 255).astype(np.uint8)).convert("RGB")
+        # dino mask 
+        boxes_mask_pil = Image.fromarray((image_mask.cpu().numpy() * 255).astype(np.uint8)).convert("RGB")
 
-    # Resize so that CUDA out of memory won't happen.
-    image_source_for_inpaint = image_source_pil.resize((512, 512))
-    image_mask_for_inpaint = image_mask_pil.resize((512, 512))
-    #image_mask_for_inpaint = boxes_mask_pil.resize((512, 512))
-    sementic_mask_for_inpaint = image_mask_pil.resize((512, 512))
-    # print(image_source.shape, image_mask.shape, sementic_mask.shape)
-    # print(image_source_pil.size, image_mask_pil.size, sementic_mask_pil.size)
-    # print(image_source_for_inpaint.size, image_mask_for_inpaint.size, sementic_mask_for_inpaint.size)
+        # Resize so that CUDA out of memory won't happen.
+        image_source_for_inpaint = image_source_pil.resize((512, 512))
+        image_mask_for_inpaint = image_mask_pil.resize((512, 512))
+        #image_mask_for_inpaint = boxes_mask_pil.resize((512, 512))
+        sementic_mask_for_inpaint = image_mask_pil.resize((512, 512))
+        # print(image_source.shape, image_mask.shape, sementic_mask.shape)
+        # print(image_source_pil.size, image_mask_pil.size, sementic_mask_pil.size)
+        # print(image_source_for_inpaint.size, image_mask_for_inpaint.size, sementic_mask_for_inpaint.size)
 
-    # ============== Step 3: Run Control net for Image Inpainting ==============
-    generator = torch.manual_seed(0)
-    result = pipe(
-        INPAINT_PROMPT,
-        num_inference_steps=100,
-        generator=generator,
-        image=image_source_for_inpaint,
-        control_image=sementic_mask_for_inpaint,
-        controlnet_conditioning_scale = 0.5,
-        mask_image=image_mask_for_inpaint,
-        negative_prompt=NEGATIVE_PROMPT,
-    ).images[0]
+        # ============== Step 3: Run Control net for Image Inpainting ==============
+        generator = torch.manual_seed(0)
+        result = pipe(
+            INPAINT_PROMPT,
+            num_inference_steps=100,
+            generator=generator,
+            image=image_source_for_inpaint,
+            control_image=sementic_mask_for_inpaint,
+            controlnet_conditioning_scale = 0.5,
+            mask_image=image_mask_for_inpaint,
+            negative_prompt=NEGATIVE_PROMPT,
+        ).images[0]
 
-    # Un-resize 
-    #result = Image.fromarray(result)
-    result = result.resize((image_source_pil.size[0], image_source_pil.size[1]))
-    result.save(os.path.join(output_dir,"diffusion_controlnet.png"))
+        # Un-resize 
+        #result = Image.fromarray(result)
+        result = result.resize((image_source_pil.size[0], image_source_pil.size[1]))
+        result.save(os.path.join(output_dir,f"{name}_result.png"))
+    
+    print(f"Done. All results are saved in {output_dir}")
