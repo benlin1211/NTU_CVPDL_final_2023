@@ -26,17 +26,16 @@ controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg",
 pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
     "runwayml/stable-diffusion-inpainting", controlnet=controlnet, torch_dtype=torch.float16
 )
-
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe = pipe.to(device)
 
 
 image = load_image('./demo/dog.png')
 mask = load_image('./demo/dog_mask.png')
-print( np.array(mask).shape)
+#print( np.array(mask).shape)
 control_image = load_image('./demo/dog_control.png')
-print( np.array(control_image).shape)
-
+#print( np.array(control_image).shape)
+print(image.size, mask.size, control_image.size)
 generator = torch.manual_seed(0)
 image = pipe(
     "a red panda sitting on a bench",

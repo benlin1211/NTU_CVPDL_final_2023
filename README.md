@@ -40,11 +40,11 @@ assume you already know the absolute path of installed diffusers
 
 (/home/pywu_server/anaconda3/envs/gsam/lib/python3.9/site-packages/diffusers/pipelines/stable_diffusion/__init__.py)
     
-    cd grounded_sam
-    cp ./pipeline_stable_diffusion_controlnet_inpaint.py PATH/pipelines/stable_diffusion
+<!-- cd grounded_sam
+cp ./pipeline_stable_diffusion_controlnet_inpaint.py PATH/pipelines/stable_diffusion -->
 
-Then, import this new added pipeline in corresponding files
+<!-- Then, import this new added pipeline in corresponding files
 - in PATH/__init__.py, line 122: add "StableDiffusionControlNetInpaintPipeline,"
 - in PATH/pipelines/__init__.py, line 56: add "StableDiffusionControlNetInpaintPipeline,"
 - in PATH/pipelines/stable_diffusion/__init__.py, line 50: add "from .pipeline_stable_diffusion_controlnet_inpaint import StableDiffusionControlNetInpaintPipeline"
-See https://github.com/haofanwang/ControlNet-for-Diffusers/tree/main for more detail.
+See https://github.com/haofanwang/ControlNet-for-Diffusers/tree/main for more detail. -->

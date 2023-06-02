@@ -67,13 +67,13 @@ if __name__ == "__main__":
     ckpt_config_filename = "GroundingDINO_SwinB.cfg.py"
     sam_checkpoint = './models/sam_vit_h_4b8939.pth'
     device = "cuda"
-    TARGET_PROMPT = "background"
+    TARGET_PROMPT = "Barack Obama" # "background"
     BOX_TRESHOLD = 0.3 
     TEXT_TRESHOLD = 0.25
-    INPAINT_PROMPT = "On a bus."
+    INPAINT_PROMPT = "China President Xi Jinping." # "Donald Trump, the president in America. Show the picture realistically" #"On a street of New York city."
 
-    local_image_path = './demo/Distracted_Boyfriend.png'
-    # 
+    # local_image_path = './demo/Distracted_Boyfriend.png'
+    local_image_path = './demo/Obama.png' #'./demo/dog.png' 
     output_dir = "./demo_output"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -138,7 +138,10 @@ if __name__ == "__main__":
     image_mask_for_inpaint = image_mask_pil.resize((512, 512))
     #annotated_frame_pil = Image.fromarray(annotated_frame)
     #annotated_frame_with_mask_pil = Image.fromarray(annotated_frame_with_mask)
-
+    print(image_source.shape, image_mask.shape)
+    print(image_source_pil.size, image_mask_pil.size)
+    print(image_source_for_inpaint.size, image_mask_for_inpaint.size)
+    
     # Stable Diffusion. Input and output: PIL.Image
     image_inpainting = pipe(prompt=INPAINT_PROMPT, image=image_source_for_inpaint, mask_image=image_mask_for_inpaint).images[0]
     #image_inpainting = pipe(prompt=INPAINT_PROMPT, image=np.array(image_source_for_inpaint), mask_image=np.array(image_mask_for_inpaint)).images[0]
