@@ -67,13 +67,14 @@ if __name__ == "__main__":
     ckpt_config_filename = "GroundingDINO_SwinB.cfg.py"
     sam_checkpoint = './models/sam_vit_h_4b8939.pth'
     device = "cuda"
-    TARGET_PROMPT = "Barack Obama" # "background"
+    TARGET_PROMPT = "The suit of the woman" # "background"
     BOX_TRESHOLD = 0.3 
     TEXT_TRESHOLD = 0.25
-    INPAINT_PROMPT = "China President Xi Jinping." # "Donald Trump, the president in America. Show the picture realistically" #"On a street of New York city."
+    INPAINT_PROMPT = "Black leather jacket." # "Spiderman" #. Show the picture realistically #"On a street of New York city."
 
     # local_image_path = './demo/Distracted_Boyfriend.png'
-    local_image_path = './demo/Obama.png' #'./demo/dog.png' 
+    local_image_path = './demo/president_linkedin.png' #'./demo/dog.png' 
+    
     output_dir = "./demo_output"
     os.makedirs(output_dir, exist_ok=True)
 

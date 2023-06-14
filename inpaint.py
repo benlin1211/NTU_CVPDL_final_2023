@@ -89,9 +89,10 @@ def make_parser():
     parser.add_argument("--negative_prompt", default="lowres, bad anatomy, worst quality, low quality")
     
     parser.add_argument("--output_dir", default="./demo_output")
-    parser.add_argument("--device_dino", default="cpu")
-    parser.add_argument("--device_sam", default="cuda:0")
+    parser.add_argument("--device_dino", default="cuda:0")
+    parser.add_argument("--device_sam", default="cuda:1")
     parser.add_argument("--device_pipe", default="cuda:1")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()  
 
     return args
@@ -112,11 +113,13 @@ if __name__ == "__main__":
     INPAINT_PROMPT = args.inpaint_prompt
     NEGATIVE_PROMPT = args.negative_prompt
     local_image_path = args.image_path
+    name = local_image_path.split("/")[-1].split(".")[0]
 
     device_dino = args.device_dino
     device_sam = args.device_sam
     device_pipe = args.device_pipe
     output_dir = args.output_dir
+    verbose = args.verbose
     os.makedirs(output_dir, exist_ok=True)
 
     # Load Dino to "cuda:1"
@@ -163,13 +166,15 @@ if __name__ == "__main__":
         image=image, 
         caption=TARGET_PROMPT, 
         box_threshold=BOX_TRESHOLD, 
-        text_threshold=TEXT_TRESHOLD
+        text_threshold=TEXT_TRESHOLD,
+        device=device_dino
     )
 
-    annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
-    annotated_frame = annotated_frame[...,::-1] # BGR to RGB
-    plt.imsave(os.path.join(output_dir,"origin.png"), image_source)
-    plt.imsave(os.path.join(output_dir,"dino.png"), annotated_frame)
+    if verbose:
+        annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
+        annotated_frame = annotated_frame[...,::-1] # BGR to RGB
+        plt.imsave(os.path.join(output_dir,f"{name}_origin.png"), image_source)
+        plt.imsave(os.path.join(output_dir,f"{name}_dino.png"), annotated_frame)
 
     # Run segmentation anything model
     sam_predictor.set_image(image_source)
@@ -190,10 +195,11 @@ if __name__ == "__main__":
         sementic_mask = convert_anns(sementic_mask)
 
     # Save mask
-    for i, mask in enumerate(masks):
-        annotated_frame_with_mask = show_mask(mask[0].detach().cpu(), annotated_frame)
-        plt.imsave(os.path.join(output_dir,f"sam_{i}.png"), annotated_frame_with_mask)
-    plt.imsave(os.path.join(output_dir,"sam_all.png"), sementic_mask)
+    if verbose:
+        for i, mask in enumerate(masks):
+            annotated_frame_with_mask = show_mask(mask[0].detach().cpu(), annotated_frame)
+            plt.imsave(os.path.join(output_dir,f"{name}_sam_{i}.png"), annotated_frame_with_mask)
+        plt.imsave(os.path.join(output_dir,f"{name}_sam_all.png"), sementic_mask)
 
     # Get mask
     image_mask = masks[0][0].detach().cpu()
@@ -229,4 +235,5 @@ if __name__ == "__main__":
     # Un-resize 
     #result = Image.fromarray(result)
     result = result.resize((image_source_pil.size[0], image_source_pil.size[1]))
-    result.save(os.path.join(output_dir,"diffusion_controlnet.png"))
+    result.save(os.path.join(output_dir,f"{name}.png"))
+    print(f"Done. All results are saved in {output_dir}")
